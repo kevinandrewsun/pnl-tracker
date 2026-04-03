@@ -245,26 +245,34 @@ const expand = entries => {
     setFetching(false);
   };
 
-  const fetchTradesData = async (ticker, dir) => {
-    if (!ticker || !dir) return;
+const fetchTradesData = async (ticker) => {
+    if (!ticker) return;
     setTradesLoading(true);
     try {
       const year = new Date().getFullYear();
       const from = `${year}-01-01`;
       const to = new Date().toISOString().split("T")[0];
       const prices = await fetchHistoricalPrices(ticker, from, to);
-      const posMap = {};
+      const longMap = {}, shortMap = {};
       hist.forEach(h => {
-        const entry = h.entries.find(e => e.ticker === ticker && e.dir === dir);
-        posMap[h.date] = entry ? entry.size : 0;
+        const lEntry = h.entries.find(e => e.ticker === ticker && e.dir === "L");
+        const sEntry = h.entries.find(e => e.ticker === ticker && e.dir === "S");
+        longMap[h.date] = lEntry ? lEntry.size : 0;
+        shortMap[h.date] = sEntry ? sEntry.size : 0;
       });
-      const merged = prices.map(p => ({ date: p.date, price: p.price, size: posMap[p.date] ?? null }));
+      const merged = prices.map(p => ({
+        date: p.date, price: p.price,
+        longSize: longMap[p.date] ?? null,
+        shortSize: shortMap[p.date] ?? null,
+      }));
       const histDates = hist.map(h => h.date).sort();
       const firstHist = histDates.length > 0 ? histDates[0] : null;
-      let lastKnown = null;
+      let lastLong = null, lastShort = null;
       for (let i = 0; i < merged.length; i++) {
-        if (merged[i].size != null) { lastKnown = merged[i].size; }
-        else if (firstHist && merged[i].date > firstHist && lastKnown != null) { merged[i].size = lastKnown; }
+        if (merged[i].longSize != null) lastLong = merged[i].longSize;
+        else if (firstHist && merged[i].date > firstHist && lastLong != null) merged[i].longSize = lastLong;
+        if (merged[i].shortSize != null) lastShort = merged[i].shortSize;
+        else if (firstHist && merged[i].date > firstHist && lastShort != null) merged[i].shortSize = lastShort;
       }
       setTradesData(merged);
     } catch (e) {
@@ -738,39 +746,38 @@ const expand = entries => {
 
       {/* TRADES */}
       {tab === 7 && (() => {
-        const allPositions = [];
-        const seen = new Set();
-        hist.forEach(h => h.entries.forEach(e => {
-          const k = `${e.ticker}-${e.dir}`;
-          if (!seen.has(k)) { seen.add(k); allPositions.push({ ticker: e.ticker, dir: e.dir }); }
-        }));
-        allPositions.sort((a, b) => a.ticker.localeCompare(b.ticker));
+        const allTickers = [...new Set(hist.flatMap(h => h.entries.map(e => e.ticker)))].sort();
+        const allTradesSectors = [...new Set(allTickers.map(t => sect[t] || "Unassigned"))].sort();
+        const filteredTickers = allTickers.filter(t => {
+          if (tradesSectorFilter === "All") return true;
+          return (sect[t] || "Unassigned") === tradesSectorFilter;
+        });
 
-        const handleSelect = (ticker, dir) => {
-          setTradesTicker(ticker); setTradesDir(dir); setTradesData([]); fetchTradesData(ticker, dir);
+        const handleSelect = (ticker) => {
+          setTradesTicker(ticker); setTradesDir(null); setTradesData([]); fetchTradesData(ticker);
         };
 
+        const hasLong = tradesData.some(d => d.longSize != null && d.longSize > 0.0001);
+        const hasShort = tradesData.some(d => d.shortSize != null && d.shortSize > 0.0001);
         const priceRange = tradesData.length > 0 ? { min: Math.min(...tradesData.map(d => d.price)), max: Math.max(...tradesData.map(d => d.price)) } : null;
-        const sizeRange = tradesData.length > 0 ? { min: 0, max: Math.max(...tradesData.filter(d => d.size != null).map(d => d.size), 1) } : null;
-        const positionDays = tradesData.filter(d => d.size != null && d.size > 0);
-        const avgSize = positionDays.length > 0 ? positionDays.reduce((s, d) => s + d.size, 0) / positionDays.length : 0;
-        const maxSize = positionDays.length > 0 ? Math.max(...positionDays.map(d => d.size)) : 0;
-        const minSize = positionDays.length > 0 ? Math.min(...positionDays.map(d => d.size)) : 0;
-        const avgPrice = positionDays.length > 0 ? positionDays.reduce((s, d) => s + d.price, 0) / positionDays.length : 0;
+        const allSizes = tradesData.filter(d => (d.longSize != null && d.longSize > 0) || (d.shortSize != null && d.shortSize > 0));
+        const maxSizeVal = allSizes.length > 0 ? Math.max(...allSizes.map(d => Math.max(d.longSize || 0, d.shortSize || 0))) : 1;
+        const sizeRange = { min: 0, max: maxSizeVal };
+
+        const longDays = tradesData.filter(d => d.longSize != null && d.longSize > 0.0001);
+        const shortDays = tradesData.filter(d => d.shortSize != null && d.shortSize > 0.0001);
+        const avgLong = longDays.length > 0 ? longDays.reduce((s, d) => s + d.longSize, 0) / longDays.length : 0;
+        const maxLong = longDays.length > 0 ? Math.max(...longDays.map(d => d.longSize)) : 0;
+        const avgShort = shortDays.length > 0 ? shortDays.reduce((s, d) => s + d.shortSize, 0) / shortDays.length : 0;
+        const maxShort = shortDays.length > 0 ? Math.max(...shortDays.map(d => d.shortSize)) : 0;
         const lastPrice = tradesData.length > 0 ? tradesData[tradesData.length - 1].price : 0;
         const firstPrice = tradesData.length > 0 ? tradesData[0].price : 0;
         const ytdReturn = firstPrice > 0 ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
 
-        const allTradesSectors = [...new Set(allPositions.map(p => sect[p.ticker] || "Unassigned"))].sort();
-        const filteredPositions = allPositions.filter(p => {
-          if (tradesSectorFilter === "All") return true;
-          return (sect[p.ticker] || "Unassigned") === tradesSectorFilter;
-        });
-
         return <div>
           <div style={{ ...S.card, marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Price vs Position Sizing</h3>
-            <p style={{ fontSize: 12, color: "#71717a", marginBottom: 16 }}>Select a position to see YTD stock price overlaid with your sizing. Evaluate whether you traded it well.</p>
+            <p style={{ fontSize: 12, color: "#71717a", marginBottom: 16 }}>Select a ticker to see YTD stock price overlaid with your long and short sizing.</p>
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <label style={{ fontSize: 11, color: "#71717a" }}>Sector:</label>
@@ -780,14 +787,14 @@ const expand = entries => {
                 </select>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <label style={{ fontSize: 11, color: "#71717a" }}>Position:</label>
-                <select value={tradesTicker && tradesDir ? `${tradesTicker}-${tradesDir}` : ""} onChange={e => { if (!e.target.value) return; const [ticker, dir] = e.target.value.split(/-(?=[LS]$)/); handleSelect(ticker, dir); }} style={{ ...S.inp, width: 260, padding: "8px 12px", fontSize: 13 }}>
-                  <option value="">Select a position...</option>
-                  {filteredPositions.map(p => <option key={`${p.ticker}-${p.dir}`} value={`${p.ticker}-${p.dir}`}>{p.ticker} — {p.dir === "L" ? "LONG" : "SHORT"}</option>)}
+                <label style={{ fontSize: 11, color: "#71717a" }}>Ticker:</label>
+                <select value={tradesTicker || ""} onChange={e => { if (e.target.value) handleSelect(e.target.value); }} style={{ ...S.inp, width: 200, padding: "8px 12px", fontSize: 13 }}>
+                  <option value="">Select a ticker...</option>
+                  {filteredTickers.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
             </div>
-            {allPositions.length === 0 && <p style={{ color: "#71717a" }}>No positions yet. Import data first.</p>}
+            {allTickers.length === 0 && <p style={{ color: "#71717a" }}>No positions yet. Import data first.</p>}
           </div>
 
           {tradesLoading && <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#71717a" }}>Fetching price data...</div>}
@@ -798,26 +805,33 @@ const expand = entries => {
                 {[
                   { l: "YTD Return", v: ytdReturn.toFixed(1) + "%", c: ytdReturn >= 0 ? "#22c55e" : "#ef4444" },
                   { l: "Last Price", v: "$" + lastPrice.toFixed(2), c: "#e4e4e7" },
-                  { l: "Avg Size (held)", v: avgSize.toFixed(2) + "%", c: "#e4e4e7" },
-                  { l: "Max Size", v: maxSize.toFixed(2) + "%", c: "#e4e4e7" },
-                  { l: "Min Size", v: minSize.toFixed(2) + "%", c: "#e4e4e7" },
-                  { l: "Avg Price (held)", v: "$" + avgPrice.toFixed(2), c: "#e4e4e7" },
+                  ...(hasLong ? [
+                    { l: "Avg Long Size", v: avgLong.toFixed(2) + "%", c: "#22c55e" },
+                    { l: "Max Long Size", v: maxLong.toFixed(2) + "%", c: "#22c55e" },
+                  ] : []),
+                  ...(hasShort ? [
+                    { l: "Avg Short Size", v: avgShort.toFixed(2) + "%", c: "#ef4444" },
+                    { l: "Max Short Size", v: maxShort.toFixed(2) + "%", c: "#ef4444" },
+                  ] : []),
                 ].map((c, i) => <div key={i} style={S.card}><div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>{c.l}</div><div style={{ fontSize: 18, fontWeight: 700, color: c.c }}>{c.v}</div></div>)}
               </div>
             </div>
 
             <div style={{ ...S.card, marginBottom: 16 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{tradesTicker} <Sd d={tradesDir} /> — YTD</h3>
-              <p style={{ fontSize: 11, color: "#71717a", marginBottom: 16 }}>Blue line = stock price (left axis) · {tradesDir === "L" ? "Green" : "Red"} area = position weight (right axis)</p>
+              <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{tradesTicker} — YTD</h3>
+              <p style={{ fontSize: 11, color: "#71717a", marginBottom: 16 }}>
+                Blue line = stock price (left axis){hasLong ? " · Green area = long weight" : ""}{hasShort ? " · Red area = short weight" : ""} (right axis)
+              </p>
               <ResponsiveContainer width="100%" height={350}>
                 <ComposedChart data={tradesData}>
                   <CartesianGrid stroke="#2a2d3a" strokeDasharray="3 3" />
                   <XAxis dataKey="date" tick={{ fill: "#71717a", fontSize: 10 }} />
                   <YAxis yAxisId="price" orientation="left" tick={{ fill: "#71717a", fontSize: 10 }} tickFormatter={v => "$" + v.toFixed(0)} domain={priceRange ? [priceRange.min * 0.95, priceRange.max * 1.05] : ["auto", "auto"]} />
-                  <YAxis yAxisId="size" orientation="right" tick={{ fill: "#71717a", fontSize: 10 }} tickFormatter={v => v.toFixed(1) + "%"} domain={sizeRange ? [0, sizeRange.max * 1.2] : [0, "auto"]} />
-                  <Tooltip contentStyle={{ background: "#1a1d27", border: "1px solid #2a2d3a", borderRadius: 6, fontSize: 12 }} formatter={(value, name) => { if (name === "Price") return ["$" + Number(value).toFixed(2), name]; if (name === "Size") return [Number(value).toFixed(2) + "%", name]; return [value, name]; }} />
+                  <YAxis yAxisId="size" orientation="right" tick={{ fill: "#71717a", fontSize: 10 }} tickFormatter={v => v.toFixed(1) + "%"} domain={[0, sizeRange.max * 1.2]} />
+                  <Tooltip contentStyle={{ background: "#1a1d27", border: "1px solid #2a2d3a", borderRadius: 6, fontSize: 12 }} formatter={(value, name) => { if (name === "Price") return ["$" + Number(value).toFixed(2), name]; if (name === "Long" || name === "Short") return [Number(value).toFixed(2) + "%", name]; return [value, name]; }} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area yAxisId="size" type="stepAfter" dataKey="size" name="Size" fill={tradesDir === "L" ? "#22c55e22" : "#ef444422"} stroke={tradesDir === "L" ? "#22c55e" : "#ef4444"} strokeWidth={1.5} connectNulls={false} />
+                  {hasLong && <Area yAxisId="size" type="stepAfter" dataKey="longSize" name="Long" fill="#22c55e22" stroke="#22c55e" strokeWidth={1.5} connectNulls={false} />}
+                  {hasShort && <Area yAxisId="size" type="stepAfter" dataKey="shortSize" name="Short" fill="#ef444422" stroke="#ef4444" strokeWidth={1.5} connectNulls={false} />}
                   <Line yAxisId="price" type="monotone" dataKey="price" name="Price" stroke="#6366f1" strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
