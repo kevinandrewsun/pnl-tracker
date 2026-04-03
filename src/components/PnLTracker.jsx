@@ -458,8 +458,7 @@ export default function PnLTracker({ session }) {
     <div style={S.bg}><div style={{ maxWidth: 1060, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>P&L Tracker</h1>
-          <p style={{ color: "#71717a", fontSize: 13, marginBottom: 20 }}>Position sizing & P&L decomposition</p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>APC P&L Tracker</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 12, color: "#71717a" }}>{session.user.email}</span>

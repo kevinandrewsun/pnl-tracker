@@ -61,12 +61,8 @@ export default function Auth() {
     <div style={S.bg}>
       <div style={S.card}>
         <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-          P&L Tracker
+          APC P&L Tracker
         </h1>
-        <p style={{ color: "#71717a", fontSize: 13, marginBottom: 24 }}>
-          Position sizing & P&L decomposition
-        </p>
-
         <form onSubmit={handleAuth}>
           <input
             type="email" placeholder="Email" value={email}
