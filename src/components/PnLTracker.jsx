@@ -80,7 +80,8 @@ export default function PnLTracker({ session }) {
   const [tradesDir, setTradesDir] = useState(null);
   const [tradesData, setTradesData] = useState([]);
   const [tradesLoading, setTradesLoading] = useState(false);
-
+  const [tradesSectorFilter, setTradesSectorFilter] = useState("All");
+  
   useEffect(() => {
     (async () => {
       try {
@@ -655,28 +656,32 @@ export default function PnLTracker({ session }) {
         const firstPrice = tradesData.length > 0 ? tradesData[0].price : 0;
         const ytdReturn = firstPrice > 0 ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
 
+        const allTradesSectors = [...new Set(allPositions.map(p => sect[p.ticker] || "Unassigned"))].sort();
+        const filteredPositions = allPositions.filter(p => {
+          if (tradesSectorFilter === "All") return true;
+          return (sect[p.ticker] || "Unassigned") === tradesSectorFilter;
+        });
+
         return <div>
           <div style={{ ...S.card, marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Price vs Position Sizing</h3>
             <p style={{ fontSize: 12, color: "#71717a", marginBottom: 16 }}>Select a position to see YTD stock price overlaid with your sizing. Evaluate whether you traded it well.</p>
-              <div style={{ marginBottom: 16 }}>
-                <select
-                  value={tradesTicker && tradesDir ? `${tradesTicker}-${tradesDir}` : ""}
-                  onChange={e => {
-                    if (!e.target.value) return;
-                    const [ticker, dir] = e.target.value.split(/-(?=[LS]$)/);
-                    handleSelect(ticker, dir);
-                  }}
-                  style={{ ...S.inp, width: 260, padding: "8px 12px", fontSize: 13 }}
-                >
-                  <option value="">Select a position...</option>
-                  {allPositions.map(p => (
-                    <option key={`${p.ticker}-${p.dir}`} value={`${p.ticker}-${p.dir}`}>
-                      {p.ticker} — {p.dir === "L" ? "LONG" : "SHORT"}
-                    </option>
-                  ))}
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <label style={{ fontSize: 11, color: "#71717a" }}>Sector:</label>
+                <select value={tradesSectorFilter} onChange={e => setTradesSectorFilter(e.target.value)} style={{ ...S.inp, width: 160, padding: "8px 12px", fontSize: 13 }}>
+                  <option value="All">All Sectors</option>
+                  {allTradesSectors.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <label style={{ fontSize: 11, color: "#71717a" }}>Position:</label>
+                <select value={tradesTicker && tradesDir ? `${tradesTicker}-${tradesDir}` : ""} onChange={e => { if (!e.target.value) return; const [ticker, dir] = e.target.value.split(/-(?=[LS]$)/); handleSelect(ticker, dir); }} style={{ ...S.inp, width: 260, padding: "8px 12px", fontSize: 13 }}>
+                  <option value="">Select a position...</option>
+                  {filteredPositions.map(p => <option key={`${p.ticker}-${p.dir}`} value={`${p.ticker}-${p.dir}`}>{p.ticker} — {p.dir === "L" ? "LONG" : "SHORT"}</option>)}
+                </select>
+              </div>
+            </div>
             {allPositions.length === 0 && <p style={{ color: "#71717a" }}>No positions yet. Import data first.</p>}
           </div>
 
