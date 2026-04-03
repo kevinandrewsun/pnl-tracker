@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import { storage } from "../lib/storage";
-import { fetchDailyReturns, extractTickers, returnsToText } from "../lib/market";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
+import { fetchDailyReturns, fetchHistoricalPrices, extractTickers, returnsToText } from "../lib/market";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, ComposedChart, Area } from "recharts";
 
-const TABS = ["Import","Daily","Dashboard","Attribution","Monthly","Sectors","Viz","Settings"];
+const TABS = ["Import","Daily","Dashboard","Attribution","Monthly","Sectors","Viz","Trades","Settings"];
 const colF = v => v > 0.001 ? "#22c55e" : v < -0.001 ? "#ef4444" : "#71717a";
 const fP = v => (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
 const fB = v => (v >= 0 ? "+" : "") + (v * 100).toFixed(0) + " bps";
@@ -76,14 +76,16 @@ export default function PnLTracker({ session }) {
   const [vizWindow, setVizWindow] = useState("cumulative");
   const [vizSector, setVizSector] = useState("All");
   const [fetching, setFetching] = useState(false);
+  const [tradesTicker, setTradesTicker] = useState(null);
+  const [tradesDir, setTradesDir] = useState(null);
+  const [tradesData, setTradesData] = useState([]);
+  const [tradesLoading, setTradesLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
         const keys = ["pnl-hist", "pnl-dec", "pnl-bask", "pnl-sect", "pnl-kn"];
-        const results = await Promise.all(
-          keys.map(k => storage.get(k).catch(() => null))
-        );
+        const results = await Promise.all(keys.map(k => storage.get(k).catch(() => null)));
         if (results[0]) setHist(JSON.parse(results[0].value));
         if (results[1]) setDec(JSON.parse(results[1].value));
         if (results[2]) setBask(JSON.parse(results[2].value));
@@ -96,11 +98,7 @@ export default function PnLTracker({ session }) {
     })();
   }, []);
 
-  const sv = async (k, v) => {
-    try { await storage.set(k, JSON.stringify(v)); } catch (e) {
-      console.error(`Failed to save ${k}:`, e);
-    }
-  };
+  const sv = async (k, v) => { try { await storage.set(k, JSON.stringify(v)); } catch (e) { console.error(`Failed to save ${k}:`, e); } };
 
   const parsePos = t => {
     const entries = [];
@@ -230,6 +228,35 @@ export default function PnLTracker({ session }) {
     setFetching(false);
   };
 
+  const fetchTradesData = async (ticker, dir) => {
+    if (!ticker || !dir) return;
+    setTradesLoading(true);
+    try {
+      const year = new Date().getFullYear();
+      const from = `${year}-01-01`;
+      const to = new Date().toISOString().split("T")[0];
+      const prices = await fetchHistoricalPrices(ticker, from, to);
+      const posMap = {};
+      hist.forEach(h => {
+        const entry = h.entries.find(e => e.ticker === ticker && e.dir === dir);
+        posMap[h.date] = entry ? entry.size : 0;
+      });
+      const merged = prices.map(p => ({ date: p.date, price: p.price, size: posMap[p.date] ?? null }));
+      const histDates = hist.map(h => h.date).sort();
+      const firstHist = histDates.length > 0 ? histDates[0] : null;
+      let lastKnown = null;
+      for (let i = 0; i < merged.length; i++) {
+        if (merged[i].size != null) { lastKnown = merged[i].size; }
+        else if (firstHist && merged[i].date > firstHist && lastKnown != null) { merged[i].size = lastKnown; }
+      }
+      setTradesData(merged);
+    } catch (e) {
+      console.error("Failed to fetch trades data:", e);
+      setTradesData([]);
+    }
+    setTradesLoading(false);
+  };
+
   const saveEditDate = old => {
     if (!editDateVal || editDateVal === old) { setEditDate(null); return; }
     if (hist.find(h => h.date === editDateVal)) { setMsg(`${editDateVal} exists.`); return; }
@@ -261,41 +288,28 @@ export default function PnLTracker({ session }) {
     setEditRetDate(null); setEditRetPaste(""); setMsg(`Returns updated!`);
   };
   const clearAll = async () => {
-    try {
-      await storage.set("pnl-backup", JSON.stringify({ hist, dec, bask, sect, known }));
-      setHasBak(true);
-    } catch {}
+    try { await storage.set("pnl-backup", JSON.stringify({ hist, dec, bask, sect, known })); setHasBak(true); } catch {}
     setHist([]); setDec([]); setBask({}); setSect({}); setKnown([]);
     await Promise.all(["pnl-hist","pnl-dec","pnl-bask","pnl-sect","pnl-kn"].map(k => storage.delete(k).catch(() => null)));
     setConfirmClear(false); setMsg("Cleared. Restore below.");
   };
   const restore = async () => {
-    try {
-      const b = await storage.get("pnl-backup");
-      if (!b) { setMsg("No backup."); return; }
+    try { const b = await storage.get("pnl-backup"); if (!b) { setMsg("No backup."); return; }
       const d = JSON.parse(b.value);
-      if (d.hist) { setHist(d.hist); sv("pnl-hist", d.hist); }
-      if (d.dec) { setDec(d.dec); sv("pnl-dec", d.dec); }
-      if (d.bask) { setBask(d.bask); sv("pnl-bask", d.bask); }
-      if (d.sect) { setSect(d.sect); sv("pnl-sect", d.sect); }
-      if (d.known) { setKnown(d.known); sv("pnl-kn", d.known); }
-      setMsg("Restored!");
+      if (d.hist) { setHist(d.hist); sv("pnl-hist", d.hist); } if (d.dec) { setDec(d.dec); sv("pnl-dec", d.dec); }
+      if (d.bask) { setBask(d.bask); sv("pnl-bask", d.bask); } if (d.sect) { setSect(d.sect); sv("pnl-sect", d.sect); }
+      if (d.known) { setKnown(d.known); sv("pnl-kn", d.known); } setMsg("Restored!");
     } catch (e) { setMsg("Failed: " + e.message); }
   };
   const saveSec = t => { if (!sInp.trim()) return; const ns = { ...sect, [t]: sInp.trim() }; setSect(ns); sv("pnl-sect", ns); setSEd(null); setSInp(""); };
 
-  const doExport = () => {
-    const data = JSON.stringify({ hist, dec, bask, sect, known }, null, 2);
-    setExportJson(data); setShowExport(true);
-  };
+  const doExport = () => { const data = JSON.stringify({ hist, dec, bask, sect, known }, null, 2); setExportJson(data); setShowExport(true); };
   const doImport = async () => {
     try {
       const d = JSON.parse(importJson);
       if (!d.hist || !d.dec) { setImportMsg("Invalid format — missing hist or dec."); return; }
-      if (d.hist) { setHist(d.hist); sv("pnl-hist", d.hist); }
-      if (d.dec) { setDec(d.dec); sv("pnl-dec", d.dec); }
-      if (d.bask) { setBask(d.bask); sv("pnl-bask", d.bask); }
-      if (d.sect) { setSect(d.sect); sv("pnl-sect", d.sect); }
+      if (d.hist) { setHist(d.hist); sv("pnl-hist", d.hist); } if (d.dec) { setDec(d.dec); sv("pnl-dec", d.dec); }
+      if (d.bask) { setBask(d.bask); sv("pnl-bask", d.bask); } if (d.sect) { setSect(d.sect); sv("pnl-sect", d.sect); }
       if (d.known) { setKnown(d.known); sv("pnl-kn", d.known); }
       setImportJson(""); setImportMsg(""); setMsg("Data imported successfully!"); setTab(2);
     } catch (e) { setImportMsg("Parse error: " + e.message); }
@@ -307,9 +321,9 @@ export default function PnLTracker({ session }) {
   const cumPnl = useMemo(() => {
     let ct = 0, cl = 0, cs = 0;
     return dec.map(d => {
-      const dT = d.entries.reduce((s, e) => s + e.pnl, 0), dL = d.entries.filter(e => e.dir === "L").reduce((s, e) => s + e.pnl, 0), dS = d.entries.filter(e => e.dir === "S").reduce((s, e) => s + e.pnl, 0), dTr = d.entries.reduce((s, e) => s + e.trading, 0);
+      const dT = d.entries.reduce((s, e) => s + e.pnl, 0), dL = d.entries.filter(e => e.dir === "L").reduce((s, e) => s + e.pnl, 0), dS = d.entries.filter(e => e.dir === "S").reduce((s, e) => s + e.pnl, 0);
       ct += dT; cl += dL; cs += dS;
-      return { date: d.date, cumTotal: +ct.toFixed(2), cumLong: +cl.toFixed(2), cumShort: +cs.toFixed(2), dTotal: +dT.toFixed(2), dTrading: +dTr.toFixed(2) };
+      return { date: d.date, cumTotal: +ct.toFixed(2), cumLong: +cl.toFixed(2), cumShort: +cs.toFixed(2), dTotal: +dT.toFixed(2) };
     });
   }, [dec]);
 
@@ -326,11 +340,9 @@ export default function PnLTracker({ session }) {
     if (!selDate || !dec.length) return null;
     const fd = dec.filter(d => d.date <= selDate); if (!fd.length) return null;
     const dp = fd.map(d => d.entries.reduce((s, e) => s + e.pnl, 0));
-    const up = dp.filter(p => p > 0.0001).length;
-    const ba = dp.length > 0 ? up / dp.length : 0;
+    const up = dp.filter(p => p > 0.0001).length, ba = dp.length > 0 ? up / dp.length : 0;
     const mn = dp.reduce((s, v) => s + v, 0) / dp.length;
-    const vr = dp.reduce((s, v) => s + (v - mn) ** 2, 0) / dp.length;
-    const vol = Math.sqrt(vr);
+    const vr = dp.reduce((s, v) => s + (v - mn) ** 2, 0) / dp.length, vol = Math.sqrt(vr);
     const sh = vol > 0.0001 ? (mn / vol) * Math.sqrt(252) : null;
     const ups = dp.filter(p => p > 0.0001), dns = dp.filter(p => p < -0.0001);
     const aw = ups.length > 0 ? ups.reduce((s, v) => s + v, 0) / ups.length : 0;
@@ -389,17 +401,10 @@ export default function PnLTracker({ session }) {
     { key: "grossExp", label: "Gross Exp (%)", color: "#fbbf24", group: "Exp" },
   ];
   const vizGroups = [...new Set(VIZ_METRICS.map(m => m.group))];
-  const ROLLING_OPTIONS = [
-    { label: "Cumulative", value: "cumulative" },
-    { label: "5d", value: 5 },
-    { label: "10d", value: 10 },
-    { label: "20d", value: 20 },
-    { label: "60d", value: 60 },
-  ];
+  const ROLLING_OPTIONS = [{ label: "Cumulative", value: "cumulative" }, { label: "5d", value: 5 }, { label: "10d", value: 10 }, { label: "20d", value: 20 }, { label: "60d", value: 60 }];
 
   const calcMetrics = (allDP, tkCumSnap) => {
-    const dp = allDP;
-    const upD = dp.filter(p => p > 0.0001).length;
+    const dp = allDP, upD = dp.filter(p => p > 0.0001).length;
     const ba = dp.length > 0 ? +(upD / dp.length * 100).toFixed(1) : 0;
     const mn = dp.length > 0 ? dp.reduce((s, v) => s + v, 0) / dp.length : 0;
     const vr = dp.length > 0 ? dp.reduce((s, v) => s + (v - mn) ** 2, 0) / dp.length : 0;
@@ -418,43 +423,21 @@ export default function PnLTracker({ session }) {
 
   const kpiSeries = useMemo(() => {
     if (!dec.length) return [];
-    const isRolling = vizWindow !== "cumulative";
-    const W = isRolling ? vizWindow : null;
-    let ct = 0, cl = 0, cs = 0;
-    const allDP = [];
-    const tkCumAll = {};
+    const isRolling = vizWindow !== "cumulative"; const W = isRolling ? vizWindow : null;
+    let ct = 0, cl = 0, cs = 0; const allDP = []; const tkCumAll = {};
     return dec.map((d, di) => {
       const filtE = e => vizSector === "All" || (sect[e.ticker] || "Unassigned") === vizSector;
       const dp = d.entries.filter(filtE).reduce((s, e) => s + e.pnl, 0);
       const dL = d.entries.filter(e => filtE(e) && e.dir === "L").reduce((s, e) => s + e.pnl, 0);
       const dS = d.entries.filter(e => filtE(e) && e.dir === "S").reduce((s, e) => s + e.pnl, 0);
-      ct += dp; cl += dL; cs += dS;
-      allDP.push(dp);
-      d.entries.filter(filtE).forEach(e => {
-        const k = e.ticker + "-" + e.dir;
-        if (!tkCumAll[k]) tkCumAll[k] = { dir: e.dir, cum: 0 };
-        tkCumAll[k].cum += e.pnl;
-      });
+      ct += dp; cl += dL; cs += dS; allDP.push(dp);
+      d.entries.filter(filtE).forEach(e => { const k = e.ticker + "-" + e.dir; if (!tkCumAll[k]) tkCumAll[k] = { dir: e.dir, cum: 0 }; tkCumAll[k].cum += e.pnl; });
       const slice = isRolling ? allDP.slice(Math.max(0, di + 1 - W)) : allDP;
       let tkSnap = tkCumAll;
-      if (isRolling) {
-        const winDec = dec.slice(Math.max(0, di + 1 - W), di + 1);
-        const snap = {};
-        winDec.forEach(wd => wd.entries.filter(filtE).forEach(e => {
-          const k = e.ticker + "-" + e.dir;
-          if (!snap[k]) snap[k] = { dir: e.dir, cum: 0 };
-          snap[k].cum += e.pnl;
-        }));
-        tkSnap = snap;
-      }
+      if (isRolling) { const winDec = dec.slice(Math.max(0, di + 1 - W), di + 1); const snap = {}; winDec.forEach(wd => wd.entries.filter(filtE).forEach(e => { const k = e.ticker + "-" + e.dir; if (!snap[k]) snap[k] = { dir: e.dir, cum: 0 }; snap[k].cum += e.pnl; })); tkSnap = snap; }
       const metrics = calcMetrics(slice, tkSnap);
-      const h = hist.find(x => x.date === d.date);
-      let netExp = 0, grossExp = 0;
-      if (h) {
-        const lg = h.entries.filter(e => e.dir === "L").reduce((s, e) => s + e.size, 0);
-        const sh2 = h.entries.filter(e => e.dir === "S").reduce((s, e) => s + e.size, 0);
-        netExp = +(lg - sh2).toFixed(1); grossExp = +(lg + sh2).toFixed(1);
-      }
+      const h = hist.find(x => x.date === d.date); let netExp = 0, grossExp = 0;
+      if (h) { const lg = h.entries.filter(e => e.dir === "L").reduce((s, e) => s + e.size, 0); const sh2 = h.entries.filter(e => e.dir === "S").reduce((s, e) => s + e.size, 0); netExp = +(lg - sh2).toFixed(1); grossExp = +(lg + sh2).toFixed(1); }
       let peak = -Infinity, maxDD = 0, cum2 = 0;
       for (let i = 0; i <= di; i++) { cum2 += allDP[i]; if (cum2 > peak) peak = cum2; if (peak - cum2 > maxDD) maxDD = peak - cum2; }
       return { date: d.date, cumTotal: +ct.toFixed(2), cumLong: +cl.toFixed(2), cumShort: +cs.toFixed(2), dailyPnl: +(dp * 100).toFixed(1), netExp, grossExp, maxDD: +(maxDD * 100).toFixed(1), ...metrics };
@@ -626,26 +609,15 @@ export default function PnLTracker({ session }) {
               <div style={{ minWidth: 160 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Sector</h3>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {["All", ...[...new Set(Object.values(sect))].sort()].map(s => {
-                    const active = vizSector === s;
-                    return <button key={s} onClick={() => setVizSector(s)} style={{ background: active ? "#6366f122" : "#0f1117", color: active ? "#6366f1" : "#71717a", border: `1px solid ${active ? "#6366f1" : "#2a2d3a"}`, borderRadius: 6, padding: "6px 14px", fontSize: 12, cursor: "pointer", fontWeight: active ? 600 : 400, textAlign: "left" }}>{s}</button>;
-                  })}
+                  {["All", ...[...new Set(Object.values(sect))].sort()].map(s => { const active = vizSector === s; return <button key={s} onClick={() => setVizSector(s)} style={{ background: active ? "#6366f122" : "#0f1117", color: active ? "#6366f1" : "#71717a", border: `1px solid ${active ? "#6366f1" : "#2a2d3a"}`, borderRadius: 6, padding: "6px 14px", fontSize: 12, cursor: "pointer", fontWeight: active ? 600 : 400, textAlign: "left" }}>{s}</button>; })}
                 </div>
               </div>
               <div style={{ minWidth: 200 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Window</h3>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {ROLLING_OPTIONS.map(o => {
-                    const active = vizWindow === o.value;
-                    return <button key={o.value} onClick={() => setVizWindow(o.value)} style={{ background: active ? "#6366f122" : "#0f1117", color: active ? "#6366f1" : "#71717a", border: `1px solid ${active ? "#6366f1" : "#2a2d3a"}`, borderRadius: 6, padding: "6px 14px", fontSize: 12, cursor: "pointer", fontWeight: active ? 600 : 400, textAlign: "left" }}>
-                      {o.label}
-                      {o.value !== "cumulative" && <span style={{ fontSize: 10, color: "#71717a", marginLeft: 6 }}>rolling</span>}
-                    </button>;
-                  })}
+                  {ROLLING_OPTIONS.map(o => { const active = vizWindow === o.value; return <button key={o.value} onClick={() => setVizWindow(o.value)} style={{ background: active ? "#6366f122" : "#0f1117", color: active ? "#6366f1" : "#71717a", border: `1px solid ${active ? "#6366f1" : "#2a2d3a"}`, borderRadius: 6, padding: "6px 14px", fontSize: 12, cursor: "pointer", fontWeight: active ? 600 : 400, textAlign: "left" }}>{o.label}{o.value !== "cumulative" && <span style={{ fontSize: 10, color: "#71717a", marginLeft: 6 }}>rolling</span>}</button>; })}
                 </div>
-                <p style={{ fontSize: 11, color: "#71717a", marginTop: 8, lineHeight: 1.5 }}>
-                  {vizWindow === "cumulative" ? "All metrics use all days from start." : `Perf & win metrics use trailing ${vizWindow} days. P&L and exposure always cumulative.`}
-                </p>
+                <p style={{ fontSize: 11, color: "#71717a", marginTop: 8, lineHeight: 1.5 }}>{vizWindow === "cumulative" ? "All metrics use all days from start." : `Perf & win metrics use trailing ${vizWindow} days. P&L and exposure always cumulative.`}</p>
               </div>
             </div>
           </div>
@@ -659,14 +631,93 @@ export default function PnLTracker({ session }) {
         </div>}
       </div>}
 
+      {/* TRADES */}
+      {tab === 7 && (() => {
+        const allPositions = [];
+        const seen = new Set();
+        hist.forEach(h => h.entries.forEach(e => {
+          const k = `${e.ticker}-${e.dir}`;
+          if (!seen.has(k)) { seen.add(k); allPositions.push({ ticker: e.ticker, dir: e.dir }); }
+        }));
+        allPositions.sort((a, b) => a.ticker.localeCompare(b.ticker));
+
+        const handleSelect = (ticker, dir) => {
+          setTradesTicker(ticker); setTradesDir(dir); setTradesData([]); fetchTradesData(ticker, dir);
+        };
+
+        const priceRange = tradesData.length > 0 ? { min: Math.min(...tradesData.map(d => d.price)), max: Math.max(...tradesData.map(d => d.price)) } : null;
+        const sizeRange = tradesData.length > 0 ? { min: 0, max: Math.max(...tradesData.filter(d => d.size != null).map(d => d.size), 1) } : null;
+        const positionDays = tradesData.filter(d => d.size != null && d.size > 0);
+        const avgSize = positionDays.length > 0 ? positionDays.reduce((s, d) => s + d.size, 0) / positionDays.length : 0;
+        const maxSize = positionDays.length > 0 ? Math.max(...positionDays.map(d => d.size)) : 0;
+        const minSize = positionDays.length > 0 ? Math.min(...positionDays.map(d => d.size)) : 0;
+        const avgPrice = positionDays.length > 0 ? positionDays.reduce((s, d) => s + d.price, 0) / positionDays.length : 0;
+        const lastPrice = tradesData.length > 0 ? tradesData[tradesData.length - 1].price : 0;
+        const firstPrice = tradesData.length > 0 ? tradesData[0].price : 0;
+        const ytdReturn = firstPrice > 0 ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
+
+        return <div>
+          <div style={{ ...S.card, marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Price vs Position Sizing</h3>
+            <p style={{ fontSize: 12, color: "#71717a", marginBottom: 16 }}>Select a position to see YTD stock price overlaid with your sizing. Evaluate whether you traded it well.</p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+              {allPositions.map(p => {
+                const active = tradesTicker === p.ticker && tradesDir === p.dir;
+                return <button key={`${p.ticker}-${p.dir}`} onClick={() => handleSelect(p.ticker, p.dir)} style={{
+                  background: active ? (p.dir === "L" ? "#22c55e22" : "#ef444422") : "#0f1117",
+                  color: active ? (p.dir === "L" ? "#22c55e" : "#ef4444") : "#71717a",
+                  border: `1px solid ${active ? (p.dir === "L" ? "#22c55e" : "#ef4444") : "#2a2d3a"}`,
+                  borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontWeight: active ? 600 : 400,
+                }}>{p.ticker} <span style={{ fontSize: 10, opacity: 0.7 }}>{p.dir === "L" ? "LONG" : "SHORT"}</span></button>;
+              })}
+            </div>
+            {allPositions.length === 0 && <p style={{ color: "#71717a" }}>No positions yet. Import data first.</p>}
+          </div>
+
+          {tradesLoading && <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#71717a" }}>Fetching price data...</div>}
+
+          {!tradesLoading && tradesTicker && tradesData.length > 0 && <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+                {[
+                  { l: "YTD Return", v: ytdReturn.toFixed(1) + "%", c: ytdReturn >= 0 ? "#22c55e" : "#ef4444" },
+                  { l: "Last Price", v: "$" + lastPrice.toFixed(2), c: "#e4e4e7" },
+                  { l: "Avg Size (held)", v: avgSize.toFixed(2) + "%", c: "#e4e4e7" },
+                  { l: "Max Size", v: maxSize.toFixed(2) + "%", c: "#e4e4e7" },
+                  { l: "Min Size", v: minSize.toFixed(2) + "%", c: "#e4e4e7" },
+                  { l: "Avg Price (held)", v: "$" + avgPrice.toFixed(2), c: "#e4e4e7" },
+                ].map((c, i) => <div key={i} style={S.card}><div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>{c.l}</div><div style={{ fontSize: 18, fontWeight: 700, color: c.c }}>{c.v}</div></div>)}
+              </div>
+            </div>
+
+            <div style={{ ...S.card, marginBottom: 16 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{tradesTicker} <Sd d={tradesDir} /> — YTD</h3>
+              <p style={{ fontSize: 11, color: "#71717a", marginBottom: 16 }}>Blue line = stock price (left axis) · {tradesDir === "L" ? "Green" : "Red"} area = position weight (right axis)</p>
+              <ResponsiveContainer width="100%" height={350}>
+                <ComposedChart data={tradesData}>
+                  <CartesianGrid stroke="#2a2d3a" strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fill: "#71717a", fontSize: 10 }} />
+                  <YAxis yAxisId="price" orientation="left" tick={{ fill: "#71717a", fontSize: 10 }} tickFormatter={v => "$" + v.toFixed(0)} domain={priceRange ? [priceRange.min * 0.95, priceRange.max * 1.05] : ["auto", "auto"]} />
+                  <YAxis yAxisId="size" orientation="right" tick={{ fill: "#71717a", fontSize: 10 }} tickFormatter={v => v.toFixed(1) + "%"} domain={sizeRange ? [0, sizeRange.max * 1.2] : [0, "auto"]} />
+                  <Tooltip contentStyle={{ background: "#1a1d27", border: "1px solid #2a2d3a", borderRadius: 6, fontSize: 12 }} formatter={(value, name) => { if (name === "Price") return ["$" + Number(value).toFixed(2), name]; if (name === "Size") return [Number(value).toFixed(2) + "%", name]; return [value, name]; }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Area yAxisId="size" type="stepAfter" dataKey="size" name="Size" fill={tradesDir === "L" ? "#22c55e22" : "#ef444422"} stroke={tradesDir === "L" ? "#22c55e" : "#ef4444"} strokeWidth={1.5} connectNulls={false} />
+                  <Line yAxisId="price" type="monotone" dataKey="price" name="Price" stroke="#6366f1" strokeWidth={2} dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </>}
+
+          {!tradesLoading && tradesTicker && tradesData.length === 0 && <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#71717a" }}>No price data found for {tradesTicker}. It may not be available on FMP.</div>}
+        </div>;
+      })()}
+
       {/* SETTINGS */}
-      {tab === 7 && <div>
+      {tab === 8 && <div>
         <div style={{ ...S.card, marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Export / Import Data</h3>
           <p style={{ fontSize: 12, color: "#71717a", marginBottom: 12 }}>Use this to migrate data or create backups.</p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <button onClick={doExport} style={S.btn}>Export JSON</button>
-          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><button onClick={doExport} style={S.btn}>Export JSON</button></div>
           {showExport && <div style={{ marginBottom: 16 }}>
             <p style={{ fontSize: 12, color: "#22c55e", marginBottom: 6 }}>Copy the JSON below to save or migrate.</p>
             <textarea rows={6} readOnly value={exportJson} style={{ ...S.ta, fontSize: 11 }} onFocus={e => e.target.select()} />

@@ -1,6 +1,5 @@
 /**
  * Fetch single-day returns for an array of tickers on a specific date.
- * Uses FMP Historical EOD via /api/returns serverless function.
  * Returns: { AAPL: 0.0011, NVDA: -0.0112, ... } (decimal returns)
  */
 export async function fetchDailyReturns(tickers, targetDate) {
@@ -19,6 +18,28 @@ export async function fetchDailyReturns(tickers, targetDate) {
 }
 
 /**
+ * Fetch historical prices for a single ticker over a date range.
+ * Returns: [{ date: "2026-01-02", price: 245.50, volume: 30000000 }, ...]
+ * Sorted oldest first.
+ */
+export async function fetchHistoricalPrices(ticker, from, to) {
+  try {
+    const res = await fetch("/api/prices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker, from, to }),
+    });
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const data = await res.json();
+    // FMP returns newest first, reverse to oldest first
+    return Array.isArray(data) ? data.reverse() : [];
+  } catch (e) {
+    console.error("Failed to fetch prices:", e);
+    return [];
+  }
+}
+
+/**
  * Given a list of position entries, extract unique tickers.
  */
 export function extractTickers(entries) {
@@ -26,8 +47,7 @@ export function extractTickers(entries) {
 }
 
 /**
- * Format fetched returns into the paste-ready string format
- * the tracker already knows how to parse.
+ * Format fetched returns into the paste-ready string format.
  */
 export function returnsToText(returns) {
   return Object.entries(returns)
