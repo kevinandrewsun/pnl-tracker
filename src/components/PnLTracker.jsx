@@ -304,6 +304,56 @@ const expand = entries => {
     const nD = dec.map(d => d.date === editRetDate ? { ...d, entries: de } : d); setDec(nD); sv("pnl-dec", nD);
     setEditRetDate(null); setEditRetPaste(""); setMsg(`Returns updated!`);
   };
+  const fixClosedReturns = async () => {
+    setMsg("Scanning for closed positions with 0% returns...");
+    const fixes = [];
+    dec.forEach(d => {
+      d.entries.forEach(e => {
+        if (e.priorSize > 0.0001 && e.size < 0.0001 && Math.abs(e.dailyReturn) < 0.00001) {
+          fixes.push({ date: d.date, ticker: e.ticker });
+        }
+      });
+    });
+    if (fixes.length === 0) { setMsg("No closed positions with 0% returns found."); return; }
+    const byDate = {};
+    fixes.forEach(f => { if (!byDate[f.date]) byDate[f.date] = []; byDate[f.date].push(f.ticker); });
+    const allReturns = {};
+    const dates = Object.keys(byDate);
+    setMsg(`Fetching returns for ${fixes.length} position(s) across ${dates.length} day(s)...`);
+    for (const date of dates) {
+      const tickers = byDate[date];
+      const returns = await fetchDailyReturns(tickers, date);
+      allReturns[date] = returns;
+    }
+    let fixCount = 0;
+    const newDec = dec.map(d => {
+      if (!allReturns[d.date]) return d;
+      const priorH = hist.find(h => h.date === d.priorDate);
+      const curH = hist.find(h => h.date === d.date);
+      if (!priorH || !curH) return d;
+      const ret = {};
+      d.entries.forEach(e => { ret[e.ticker] = e.dailyReturn; });
+      Object.entries(allReturns[d.date]).forEach(([ticker, r]) => {
+        if (ret[ticker] !== undefined && Math.abs(ret[ticker]) < 0.00001) {
+          ret[ticker] = r;
+          fixCount++;
+        }
+      });
+      const de = decompCalc(priorH.entries, curH.entries, ret);
+      return { ...d, entries: de };
+    });
+      setDec(newDec); sv("pnl-dec", newDec);
+          const unfixed = [];
+          fixes.forEach(f => {
+            const r = allReturns[f.date]?.[f.ticker];
+            if (r == null) unfixed.push(`${f.ticker} (${f.date})`);
+          });
+          if (unfixed.length === 0) {
+            setMsg(`Fixed ${fixCount} closed position return(s) across ${dates.length} day(s)!`);
+          } else {
+            setMsg(`Fixed ${fixCount} return(s). Could not fetch ${unfixed.length}: ${unfixed.join(", ")}. Update these manually in Settings → Dates → Returns.`);
+          }
+  };
   const recalcAll = async () => {
     // Net all historical positions
     const newHist = hist.map(h => {
@@ -799,7 +849,7 @@ const expand = entries => {
         <div style={{ ...S.card, marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Data</h3>
           <p style={{ fontSize: 12, color: "#71717a", marginBottom: 4 }}>{hist.length} day(s) positions · {dec.length} day(s) P&L · {[...new Set(hist.flatMap(h => h.entries.map(e => e.ticker)))].length} tickers · {Object.keys(bask).length} baskets</p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><button onClick={recalcAll} style={S.btn}>Recalculate All</button></div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><button onClick={recalcAll} style={S.btn}>Recalculate All</button><button onClick={fixClosedReturns} style={{ ...S.btn, background: "#f59e0b", color: "#0f1117" }}>Fix Closed Returns</button></div>
           <div style={{ marginTop: 12 }}>{!confirmClear ? <div style={{ display: "flex", gap: 8 }}><button onClick={() => setConfirmClear(true)} style={S.btnD}>Clear All</button>{hasBak && <button onClick={restore} style={{ ...S.btn, background: "#f59e0b", color: "#0f1117" }}>Restore Backup</button>}</div> : <div><p style={{ fontSize: 13, color: "#ef4444", marginBottom: 8 }}>Sure? Backup saved automatically.</p><div style={{ display: "flex", gap: 8 }}><button onClick={clearAll} style={S.btnD}>Yes, Clear</button><button onClick={() => setConfirmClear(false)} style={S.btnSm}>Cancel</button></div></div>}</div>
         </div>
         {Object.keys(bask).length > 0 && <div style={{ ...S.card, marginBottom: 16 }}><h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Baskets</h3>{Object.entries(bask).map(([nm, cs]) => <div key={nm} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #2a2d3a" }}><div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{nm}</div>{editBask === nm ? <div><textarea rows={5} value={editBaskInp} onChange={e => setEditBaskInp(e.target.value)} style={{ ...S.ta, marginBottom: 8 }} /><div style={{ display: "flex", gap: 8 }}><button onClick={saveEditBask} style={{ ...S.btnSm, background: "#22c55e" }}>Save</button><button onClick={() => { setEditBask(null); setEditBaskInp(""); }} style={S.btnSm}>Cancel</button></div></div> : <div><div style={{ fontSize: 12, color: "#71717a", marginBottom: 8 }}>{cs.map(c => `${c.ticker} ${(c.weight * 100).toFixed(0)}%`).join(", ")}</div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { setEditBask(nm); setEditBaskInp(cs.map(c => `${c.ticker} ${(c.weight * 100).toFixed(0)}`).join("\n")); }} style={{ ...S.btnSm, background: "#6366f1" }}>Edit</button><button onClick={() => { const nb = { ...bask }; delete nb[nm]; setBask(nb); sv("pnl-bask", nb); }} style={{ ...S.btnSm, background: "#dc2626" }}>Remove</button></div></div>}</div>)}</div>}
