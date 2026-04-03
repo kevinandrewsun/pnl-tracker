@@ -219,8 +219,13 @@ export default function PnLTracker({ session }) {
       const priorH = hist[hist.length - 1];
       if (!priorH) { setMsg("No prior day to fetch returns for."); setFetching(false); return; }
       const tickers = extractTickers(priorH.entries);
-      const from = priorH.date;
-      const to = date;
+      // Always use a wide range around the prior date to capture trading days
+      const fromD = new Date(priorH.date);
+      fromD.setDate(fromD.getDate() - 7);
+      const toD = new Date(priorH.date);
+      toD.setDate(toD.getDate() + 7);
+      const from = fromD.toISOString().split("T")[0];
+      const to = toD.toISOString().split("T")[0];
       const returns = await fetchDailyReturns(tickers, from, to);
       const text = returnsToText(returns);
       setRetPaste(text);
