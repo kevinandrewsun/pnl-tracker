@@ -1,14 +1,14 @@
 /**
- * Fetch daily returns for an array of tickers between two dates.
- * Routes through the /api/returns serverless function.
- * Returns: { AAPL: 0.0234, NVDA: -0.0112, ... } (decimal returns)
+ * Fetch single-day returns for an array of tickers on a specific date.
+ * Uses FMP Historical EOD via /api/returns serverless function.
+ * Returns: { AAPL: 0.0011, NVDA: -0.0112, ... } (decimal returns)
  */
-export async function fetchDailyReturns(tickers, fromDate, toDate) {
+export async function fetchDailyReturns(tickers, targetDate) {
   try {
     const res = await fetch("/api/returns", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tickers, fromDate, toDate }),
+      body: JSON.stringify({ tickers, targetDate }),
     });
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     return await res.json();
