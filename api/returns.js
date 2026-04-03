@@ -20,23 +20,35 @@ export default async function handler(req, res) {
     const batch = tickers.slice(i, i + batchSize);
     await Promise.allSettled(
       batch.map(async (ticker) => {
-        const symbol = normalizeSymbol(ticker);
-        const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?from=${fromDate}&to=${toDate}&apikey=${API_KEY}`;
+        try {
+          const symbol = normalizeSymbol(ticker);
+          const url = `https://financialmodelingprep.com/stable/historical-price-eod/light?symbol=${symbol}&from=${fromDate}&to=${toDate}`;
 
-        const resp = await fetch(url);
-        if (!resp.ok) return;
+          const resp = await fetch(url, {
+            headers: { "apikey": API_KEY },
+          });
+          if (!resp.ok) return;
 
-        const data = await resp.json();
-        const hist = data.historical;
-        if (!hist || hist.length < 2) return;
+          const data = await resp.json();
+          if (!Array.isArray(data) || data.length < 2) return;
 
-        const today = hist[0];
-        const yesterday = hist[1];
-        if (today && yesterday && yesterday.close > 0) {
-          returns[ticker] = (today.close - yesterday.close) / yesterday.close;
+          // Data comes sorted newest first
+          const today = data[0];
+          const yesterday = data[1];
+
+          if (today && yesterday && yesterday.close > 0) {
+            returns[ticker] = (today.close - yesterday.close) / yesterday.close;
+          }
+        } catch (e) {
+          console.warn(`Failed to fetch ${ticker}:`, e.message);
         }
       })
     );
+
+    // Small delay between batches
+    if (i + batchSize < tickers.length) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
 
   return res.status(200).json(returns);
