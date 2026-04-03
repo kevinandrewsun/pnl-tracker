@@ -130,7 +130,7 @@ export default function PnLTracker({ session }) {
     }
     return r;
   };
-  const expand = entries => {
+const expand = entries => {
     const exp = [];
     for (const e of entries) {
       const key = e.name || e.ticker;
@@ -139,7 +139,24 @@ export default function PnLTracker({ session }) {
     }
     const agg = {};
     for (const e of exp) { const k = `${e.ticker}-${e.dir}`; agg[k] = agg[k] || { ...e, size: 0 }; agg[k].size = +(agg[k].size + e.size).toFixed(4); }
-    return Object.values(agg);
+    const dirAgg = Object.values(agg);
+    // Net long and short positions on the same ticker
+    const tickers = [...new Set(dirAgg.map(e => e.ticker))];
+    const netted = [];
+    for (const tk of tickers) {
+      const l = dirAgg.find(e => e.ticker === tk && e.dir === "L");
+      const s = dirAgg.find(e => e.ticker === tk && e.dir === "S");
+      if (l && s) {
+        const net = +(l.size - s.size).toFixed(4);
+        if (net > 0.0001) netted.push({ ...l, size: net });
+        else if (net < -0.0001) netted.push({ ...s, size: +Math.abs(net).toFixed(4) });
+        // if net is ~0, drop both
+      } else {
+        if (l) netted.push(l);
+        if (s) netted.push(s);
+      }
+    }
+    return netted;
   };
   const decompCalc = (prior, cur, ret) => {
     const pm = {}, cm = {};
