@@ -205,7 +205,6 @@ const expand = entries => {
     const prior = nh[idx - 1];
     let ret = override || parseRet(retPaste);
     const curTk = new Set(entries.map(e => e.ticker));
-    prior.entries.forEach(e => { if (!curTk.has(e.ticker) && ret[e.ticker] == null) ret[e.ticker] = 0; });
     const allT = [...new Set([...prior.entries.map(e => e.ticker), ...entries.map(e => e.ticker)])];
     const fail = allT.filter(t => ret[t] == null);
     if (fail.length > 0 && !override) { setFailTk(fail); const mr = {}; fail.forEach(t => { mr[t] = ""; }); setManRet(mr); setMsg(`${fail.length} ticker(s) missing returns.`); return; }
