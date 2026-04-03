@@ -13,6 +13,16 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "tickers array required" });
   }
 
+  // Add buffer days to ensure we capture enough trading days
+  // (weekends, holidays, and unsettled today data)
+  const from = new Date(fromDate);
+  from.setDate(from.getDate() - 5);
+  const bufferedFrom = from.toISOString().split("T")[0];
+
+  const to = new Date(toDate);
+  to.setDate(to.getDate() - 1);
+  const bufferedTo = to.toISOString().split("T")[0];
+
   const returns = {};
 
   const batchSize = 10;
@@ -22,7 +32,7 @@ export default async function handler(req, res) {
       batch.map(async (ticker) => {
         try {
           const symbol = normalizeSymbol(ticker);
-          const url = `https://financialmodelingprep.com/stable/historical-price-eod/light?symbol=${symbol}&from=${fromDate}&to=${toDate}`;
+          const url = `https://financialmodelingprep.com/stable/historical-price-eod/light?symbol=${symbol}&from=${bufferedFrom}&to=${bufferedTo}`;
 
           const resp = await fetch(url, {
             headers: { "apikey": API_KEY },
@@ -33,6 +43,7 @@ export default async function handler(req, res) {
           if (!Array.isArray(data) || data.length < 2) return;
 
           // Data comes sorted newest first
+          // Use the two most recent trading days
           const today = data[0];
           const yesterday = data[1];
 
@@ -45,7 +56,6 @@ export default async function handler(req, res) {
       })
     );
 
-    // Small delay between batches
     if (i + batchSize < tickers.length) {
       await new Promise((r) => setTimeout(r, 200));
     }
