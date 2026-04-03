@@ -659,17 +659,24 @@ export default function PnLTracker({ session }) {
           <div style={{ ...S.card, marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Price vs Position Sizing</h3>
             <p style={{ fontSize: 12, color: "#71717a", marginBottom: 16 }}>Select a position to see YTD stock price overlaid with your sizing. Evaluate whether you traded it well.</p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-              {allPositions.map(p => {
-                const active = tradesTicker === p.ticker && tradesDir === p.dir;
-                return <button key={`${p.ticker}-${p.dir}`} onClick={() => handleSelect(p.ticker, p.dir)} style={{
-                  background: active ? (p.dir === "L" ? "#22c55e22" : "#ef444422") : "#0f1117",
-                  color: active ? (p.dir === "L" ? "#22c55e" : "#ef4444") : "#71717a",
-                  border: `1px solid ${active ? (p.dir === "L" ? "#22c55e" : "#ef4444") : "#2a2d3a"}`,
-                  borderRadius: 6, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontWeight: active ? 600 : 400,
-                }}>{p.ticker} <span style={{ fontSize: 10, opacity: 0.7 }}>{p.dir === "L" ? "LONG" : "SHORT"}</span></button>;
-              })}
-            </div>
+              <div style={{ marginBottom: 16 }}>
+                <select
+                  value={tradesTicker && tradesDir ? `${tradesTicker}-${tradesDir}` : ""}
+                  onChange={e => {
+                    if (!e.target.value) return;
+                    const [ticker, dir] = e.target.value.split(/-(?=[LS]$)/);
+                    handleSelect(ticker, dir);
+                  }}
+                  style={{ ...S.inp, width: 260, padding: "8px 12px", fontSize: 13 }}
+                >
+                  <option value="">Select a position...</option>
+                  {allPositions.map(p => (
+                    <option key={`${p.ticker}-${p.dir}`} value={`${p.ticker}-${p.dir}`}>
+                      {p.ticker} — {p.dir === "L" ? "LONG" : "SHORT"}
+                    </option>
+                  ))}
+                </select>
+              </div>
             {allPositions.length === 0 && <p style={{ color: "#71717a" }}>No positions yet. Import data first.</p>}
           </div>
 
