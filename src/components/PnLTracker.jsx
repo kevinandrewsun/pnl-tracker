@@ -305,6 +305,45 @@ const expand = entries => {
     const nD = dec.map(d => d.date === editRetDate ? { ...d, entries: de } : d); setDec(nD); sv("pnl-dec", nD);
     setEditRetDate(null); setEditRetPaste(""); setMsg(`Returns updated!`);
   };
+  const recalcAll = async () => {
+    // Net all historical positions
+    const newHist = hist.map(h => {
+      const tickers = [...new Set(h.entries.map(e => e.ticker))];
+      const netted = [];
+      for (const tk of tickers) {
+        const lEntries = h.entries.filter(e => e.ticker === tk && e.dir === "L");
+        const sEntries = h.entries.filter(e => e.ticker === tk && e.dir === "S");
+        const lSize = lEntries.reduce((sum, e) => sum + e.size, 0);
+        const sSize = sEntries.reduce((sum, e) => sum + e.size, 0);
+        if (lSize > 0.0001 && sSize > 0.0001) {
+          const net = +(lSize - sSize).toFixed(4);
+          if (net > 0.0001) netted.push({ ticker: tk, dir: "L", size: net });
+          else if (net < -0.0001) netted.push({ ticker: tk, dir: "S", size: +Math.abs(net).toFixed(4) });
+        } else {
+          if (lSize > 0.0001) netted.push({ ticker: tk, dir: "L", size: +lSize.toFixed(4) });
+          if (sSize > 0.0001) netted.push({ ticker: tk, dir: "S", size: +sSize.toFixed(4) });
+        }
+      }
+      return { ...h, entries: netted };
+    });
+
+    // Recompute all decompositions using existing returns
+    const newDec = [];
+    for (let i = 1; i < newHist.length; i++) {
+      const prior = newHist[i - 1];
+      const cur = newHist[i];
+      const oldDec = dec.find(d => d.date === cur.date);
+      if (!oldDec) continue;
+      const ret = {};
+      oldDec.entries.forEach(e => { ret[e.ticker] = e.dailyReturn; });
+      const de = decompCalc(prior.entries, cur.entries, ret);
+      newDec.push({ date: cur.date, priorDate: prior.date, entries: de });
+    }
+
+    setHist(newHist); sv("pnl-hist", newHist);
+    setDec(newDec); sv("pnl-dec", newDec);
+    setMsg("Recalculated all positions and P&L!");
+  };
   const clearAll = async () => {
     try { await storage.set("pnl-backup", JSON.stringify({ hist, dec, bask, sect, known })); setHasBak(true); } catch {}
     setHist([]); setDec([]); setBask({}); setSect({}); setKnown([]);
@@ -761,6 +800,7 @@ const expand = entries => {
         <div style={{ ...S.card, marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Data</h3>
           <p style={{ fontSize: 12, color: "#71717a", marginBottom: 4 }}>{hist.length} day(s) positions · {dec.length} day(s) P&L · {[...new Set(hist.flatMap(h => h.entries.map(e => e.ticker)))].length} tickers · {Object.keys(bask).length} baskets</p>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><button onClick={recalcAll} style={S.btn}>Recalculate All</button></div>
           <div style={{ marginTop: 12 }}>{!confirmClear ? <div style={{ display: "flex", gap: 8 }}><button onClick={() => setConfirmClear(true)} style={S.btnD}>Clear All</button>{hasBak && <button onClick={restore} style={{ ...S.btn, background: "#f59e0b", color: "#0f1117" }}>Restore Backup</button>}</div> : <div><p style={{ fontSize: 13, color: "#ef4444", marginBottom: 8 }}>Sure? Backup saved automatically.</p><div style={{ display: "flex", gap: 8 }}><button onClick={clearAll} style={S.btnD}>Yes, Clear</button><button onClick={() => setConfirmClear(false)} style={S.btnSm}>Cancel</button></div></div>}</div>
         </div>
         {Object.keys(bask).length > 0 && <div style={{ ...S.card, marginBottom: 16 }}><h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Baskets</h3>{Object.entries(bask).map(([nm, cs]) => <div key={nm} style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #2a2d3a" }}><div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{nm}</div>{editBask === nm ? <div><textarea rows={5} value={editBaskInp} onChange={e => setEditBaskInp(e.target.value)} style={{ ...S.ta, marginBottom: 8 }} /><div style={{ display: "flex", gap: 8 }}><button onClick={saveEditBask} style={{ ...S.btnSm, background: "#22c55e" }}>Save</button><button onClick={() => { setEditBask(null); setEditBaskInp(""); }} style={S.btnSm}>Cancel</button></div></div> : <div><div style={{ fontSize: 12, color: "#71717a", marginBottom: 8 }}>{cs.map(c => `${c.ticker} ${(c.weight * 100).toFixed(0)}%`).join(", ")}</div><div style={{ display: "flex", gap: 8 }}><button onClick={() => { setEditBask(nm); setEditBaskInp(cs.map(c => `${c.ticker} ${(c.weight * 100).toFixed(0)}`).join("\n")); }} style={{ ...S.btnSm, background: "#6366f1" }}>Edit</button><button onClick={() => { const nb = { ...bask }; delete nb[nm]; setBask(nb); sv("pnl-bask", nb); }} style={{ ...S.btnSm, background: "#dc2626" }}>Remove</button></div></div>}</div>)}</div>}
