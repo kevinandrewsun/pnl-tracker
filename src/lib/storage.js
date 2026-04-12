@@ -5,10 +5,10 @@
 
 import { supabase } from "./supabase";
 
+const SHARED_USER_ID = "0486bed0-3882-44fc-ba4b-cfd3642a6049";
+
 async function getUserId() {
-  const { data } = await supabase.auth.getUser();
-  if (!data?.user?.id) throw new Error("Not authenticated");
-  return data.user.id;
+  return SHARED_USER_ID;
 }
 
 export const storage = {
