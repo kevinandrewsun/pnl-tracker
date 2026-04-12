@@ -13,15 +13,15 @@ async function getUserId() {
 
 export const storage = {
   async get(key) {
-    const uid = await getUserId();
     const { data, error } = await supabase
       .from("user_data")
       .select("value")
-      .eq("user_id", uid)
       .eq("key", key)
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .single();
 
-    if (error && error.code === "PGRST116") return null; // not found
+    if (error && error.code === "PGRST116") return null;
     if (error) throw error;
     return data ? { key, value: JSON.stringify(data.value) } : null;
   },
