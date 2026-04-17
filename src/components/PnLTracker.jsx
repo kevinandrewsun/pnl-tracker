@@ -4,7 +4,7 @@ import { storage } from "../lib/storage";
 import { fetchDailyReturns, fetchHistoricalPrices, extractTickers, returnsToText } from "../lib/market";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, ComposedChart, Area } from "recharts";
 
-const TABS = ["Import","Daily","Dashboard","Attribution","Monthly","Sectors","Viz","Trades","Settings"];
+const TABS = ["Import","Dashboard","Daily","Monthly","Sectors","Trades","Viz","Attribution","Settings"];
 const colF = v => v > 0.001 ? "#22c55e" : v < -0.001 ? "#ef4444" : "#71717a";
 const fP = v => (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
 const fB = v => (v >= 0 ? "+" : "") + (v * 100).toFixed(0) + " bps";
@@ -201,7 +201,7 @@ const expand = entries => {
     const nh = [...hist.filter(h => h.date !== date), { date, entries }].sort((a, b) => a.date.localeCompare(b.date));
     setHist(nh); sv("pnl-hist", nh);
     const idx = nh.findIndex(h => h.date === date);
-    if (idx === 0) { setPaste(""); setRetPaste(""); setParsed(null); setMsg("Baseline imported."); setTab(2); return; }
+    if (idx === 0) { setPaste(""); setRetPaste(""); setParsed(null); setMsg("Baseline imported."); setTab(1); return; }
     const prior = nh[idx - 1];
     let ret = override || parseRet(retPaste);
     const curTk = new Set(entries.map(e => e.ticker));
@@ -211,7 +211,7 @@ const expand = entries => {
     const de = decompCalc(prior.entries, entries, ret);
     const nd = [...dec.filter(d => d.date !== date), { date, priorDate: prior.date, entries: de }].sort((a, b) => a.date.localeCompare(b.date));
     setDec(nd); sv("pnl-dec", nd);
-    setPaste(""); setRetPaste(""); setParsed(null); setManRet(null); setFailTk([]); setMsg("Imported with P&L decomposition!"); setTab(2);
+    setPaste(""); setRetPaste(""); setParsed(null); setManRet(null); setFailTk([]); setMsg("Imported with P&L decomposition!"); setTab(1);
   };
   const submitMan = () => {
     if (!manRet) return;
@@ -425,7 +425,7 @@ const fetchTradesData = async (ticker) => {
       if (d.hist) { setHist(d.hist); sv("pnl-hist", d.hist); } if (d.dec) { setDec(d.dec); sv("pnl-dec", d.dec); }
       if (d.bask) { setBask(d.bask); sv("pnl-bask", d.bask); } if (d.sect) { setSect(d.sect); sv("pnl-sect", d.sect); }
       if (d.known) { setKnown(d.known); sv("pnl-kn", d.known); }
-      setImportJson(""); setImportMsg(""); setMsg("Data imported successfully!"); setTab(2);
+      setImportJson(""); setImportMsg(""); setMsg("Data imported successfully!"); setTab(1);
     } catch (e) { setImportMsg("Parse error: " + e.message); }
   };
 
@@ -603,7 +603,7 @@ const fetchTradesData = async (ticker) => {
       </div>}
 
       {/* DAILY */}
-      {tab === 1 && (() => {
+      {tab === 2 && (() => {
         const latDec = dec.length > 0 ? dec[dec.length - 1].date : null;
         const dDate = dailyDate || latDec;
         const dD = dec.find(d => d.date === dDate) || null;
@@ -631,7 +631,7 @@ const fetchTradesData = async (ticker) => {
       })()}
 
       {/* DASHBOARD */}
-      {tab === 2 && <div>{!latH ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#71717a" }}>No data yet.</div> : <>
+      {tab === 1 && <div>{!latH ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#71717a" }}>No data yet.</div> : <>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}><label style={{ fontSize: 13, color: "#71717a" }}>As of:</label><select value={selDate || ""} onChange={e => setDashDate(e.target.value || null)} style={{ ...S.inp, width: 180, padding: "6px 10px" }}>{hist.map(h => <option key={h.date} value={h.date}>{h.date}{h.date === latH.date ? " (latest)" : ""}</option>)}</select>{dashDate && dashDate !== latH.date && <button onClick={() => setDashDate(null)} style={S.btnSm}>Reset</button>}</div>
         {selExp && <div style={{ marginBottom: 20 }}><h3 style={{ fontSize: 13, color: "#71717a", marginBottom: 8 }}>EXPOSURE — {selDate}</h3><Cards items={[{ l: "Long", v: selExp.long, w: true }, { l: "Short", v: selExp.short, w: true }, { l: "Net", v: selExp.net, w: true }, { l: "Gross", v: selExp.gross, w: true }, { l: "Positions", v: selExp.count, n: true }]} /></div>}
         {selLSt && <div style={{ marginBottom: 20 }}><h3 style={{ fontSize: 13, color: "#71717a", marginBottom: 8 }}>P&L — {selLSt.date}</h3><Cards items={[{ l: "Total", v: selLSt.pnl, bps: true }, { l: "Long", v: selLSt.lP, bps: true }, { l: "Short", v: selLSt.sP, bps: true }, { l: "Trading", v: selLSt.tr, bps: true }, { l: `Best: ${selLSt.best.ticker}`, v: selLSt.best.pnl, bps: true }, { l: `Worst: ${selLSt.worst.ticker}`, v: selLSt.worst.pnl, bps: true }]} /></div>}
@@ -644,7 +644,7 @@ const fetchTradesData = async (ticker) => {
       </>}</div>}
 
       {/* ATTRIBUTION */}
-      {tab === 3 && (() => {
+      {tab === 7 && (() => {
         const allSec = [...new Set(cumTk.map(t => sect[t.ticker] || "Unassigned"))].sort();
         const filt = cumTk.filter(t => { if (attrFilter.ticker && !t.ticker.includes(attrFilter.ticker.toUpperCase())) return false; if (attrFilter.side !== "All" && t.dir !== attrFilter.side) return false; if (attrFilter.sector !== "All" && (sect[t.ticker] || "Unassigned") !== attrFilter.sector) return false; return true; });
         const srt = [...filt].sort((a, b) => { const c = attrSort.col; if (c === "ticker") return attrSort.dir === "asc" ? a.ticker.localeCompare(b.ticker) : b.ticker.localeCompare(a.ticker); if (c === "sector") { const va = sect[a.ticker] || "Z", vb = sect[b.ticker] || "Z"; return attrSort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); } if (c === "roic") { const va = a.roic ?? -Infinity, vb = b.roic ?? -Infinity; return attrSort.dir === "asc" ? va - vb : vb - va; } const va = a[c] || 0, vb = b[c] || 0; return attrSort.dir === "asc" ? va - vb : vb - va; });
@@ -669,7 +669,7 @@ const fetchTradesData = async (ticker) => {
       })()}
 
       {/* MONTHLY */}
-      {tab === 4 && (() => {
+      {tab === 3 && (() => {
         const allSec = [...new Set(monthlyTk.map(t => sect[t.ticker] || "Unassigned"))].sort();
         const filt = monthlyTk.filter(t => { if (monthFilter.ticker && !t.ticker.includes(monthFilter.ticker.toUpperCase())) return false; if (monthFilter.side !== "All" && t.dir !== monthFilter.side) return false; if (monthFilter.sector !== "All" && (sect[t.ticker] || "Unassigned") !== monthFilter.sector) return false; return true; });
         const srt = [...filt].sort((a, b) => { const c = monthSort.col; if (!c || c === "ticker") return (monthSort.dir === "asc" ? 1 : -1) * a.ticker.localeCompare(b.ticker); if (c === "sector") { const va = sect[a.ticker] || "Z", vb = sect[b.ticker] || "Z"; return monthSort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); } if (c === "ytd") { const va = months.reduce((s, mo) => s + (a.months[mo] || 0), 0), vb = months.reduce((s, mo) => s + (b.months[mo] || 0), 0); return monthSort.dir === "asc" ? va - vb : vb - va; } const va = a.months[c] || 0, vb = b.months[c] || 0; return monthSort.dir === "asc" ? va - vb : vb - va; });
@@ -700,7 +700,7 @@ const fetchTradesData = async (ticker) => {
       })()}
 
       {/* SECTORS */}
-      {tab === 5 && (() => {
+      {tab === 4 && (() => {
         const st = SortTh({ col: secSort.col, dir: secSort.dir, setSort: setSecSort });
         const srt = [...secAn].sort((a, b) => { const c = secSort.col; if (c === "sector") return secSort.dir === "asc" ? a.sector.localeCompare(b.sector) : b.sector.localeCompare(a.sector); if (c === "wrAll") { const va = a.totalPos > 0 ? a.winAll / a.totalPos : 0, vb = b.totalPos > 0 ? b.winAll / b.totalPos : 0; return secSort.dir === "asc" ? va - vb : vb - va; } if (c === "wrLong") { const va = a.totalLong > 0 ? a.winLong / a.totalLong : 0, vb = b.totalLong > 0 ? b.winLong / b.totalLong : 0; return secSort.dir === "asc" ? va - vb : vb - va; } if (c === "wrShort") { const va = a.totalShort > 0 ? a.winShort / a.totalShort : 0, vb = b.totalShort > 0 ? b.winShort / b.totalShort : 0; return secSort.dir === "asc" ? va - vb : vb - va; } if (c === "roic" || c === "sharpe" || c === "slugging") { const va = a[c] ?? -Infinity, vb = b[c] ?? -Infinity; return secSort.dir === "asc" ? va - vb : vb - va; } const va = a[c] || 0, vb = b[c] || 0; return secSort.dir === "asc" ? va - vb : vb - va; });
         return <div>{secAn.length === 0 ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#71717a" }}>Assign sectors in Attribution.</div> : <div style={S.card}><h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Sector Analytics</h3><div style={{ overflowX: "auto" }}><table><thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#1a1d27" }}><tr>{st.th("Sector","sector")}{st.th("Cum P&L","cumPnl",true)}{st.th("Long","longPnl",true)}{st.th("Short","shortPnl",true)}{st.th("Avg Wt","avgWt",true)}{st.th("ROIC","roic",true)}{st.th("Batting","battingAvg",true)}{st.th("Vol","vol",true)}{st.th("Sharpe","sharpe",true)}{st.th("Slug","slugging",true)}{st.th("Win","wrAll",true)}{st.th("Win L","wrLong",true)}{st.th("Win S","wrShort",true)}</tr></thead><tbody>
@@ -745,7 +745,7 @@ const fetchTradesData = async (ticker) => {
       </div>}
 
       {/* TRADES */}
-      {tab === 7 && (() => {
+      {tab === 5 && (() => {
         const allTickers = [...new Set(hist.flatMap(h => h.entries.map(e => e.ticker)))].sort();
         const allTradesSectors = [...new Set(allTickers.map(t => sect[t] || "Unassigned"))].sort();
         const filteredTickers = allTickers.filter(t => {
