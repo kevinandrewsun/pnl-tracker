@@ -61,6 +61,10 @@ export default function PnLTracker({ session }) {
   const [editRetPaste, setEditRetPaste] = useState("");
   const [hasBak, setHasBak] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwMsg, setPwMsg] = useState(null);
+  const [pwLoading, setPwLoading] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [exportJson, setExportJson] = useState("");
   const [importJson, setImportJson] = useState("");
@@ -422,6 +426,15 @@ const fetchTradesData = async (ticker) => {
   const saveSec = t => { if (!sInp.trim()) return; const ns = { ...sect, [t]: sInp.trim() }; setSect(ns); sv("pnl-sect", ns); setSEd(null); setSInp(""); };
 
   const doExport = () => { const data = JSON.stringify({ hist, dec, bask, sect, known }, null, 2); setExportJson(data); setShowExport(true); };
+  const doChangePassword = async () => {
+    if (!pwNew) { setPwMsg({ ok: false, text: "Enter a new password." }); return; }
+    if (pwNew.length < 6) { setPwMsg({ ok: false, text: "Password must be at least 6 characters." }); return; }
+    if (pwNew !== pwConfirm) { setPwMsg({ ok: false, text: "Passwords do not match." }); return; }
+    setPwLoading(true); setPwMsg(null);
+    const { error } = await supabase.auth.updateUser({ password: pwNew });
+    setPwLoading(false);
+    if (error) { setPwMsg({ ok: false, text: error.message }); } else { setPwMsg({ ok: true, text: "Password updated successfully." }); setPwNew(""); setPwConfirm(""); }
+  };
   const doImport = async () => {
     try {
       const d = JSON.parse(importJson);
@@ -886,6 +899,19 @@ const fetchTradesData = async (ticker) => {
 
       {/* SETTINGS */}
       {tab === 9 && <div>
+        <div style={{ ...S.card, marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Account</h3>
+          <p style={{ fontSize: 12, color: "#71717a", marginBottom: 16 }}>{session.user.email}</p>
+          <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: "#a1a1aa" }}>Change Password</h4>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 320 }}>
+            <input type="password" placeholder="New password" value={pwNew} onChange={e => { setPwNew(e.target.value); setPwMsg(null); }} style={{ ...S.inp, padding: "8px 12px" }} />
+            <input type="password" placeholder="Confirm new password" value={pwConfirm} onChange={e => { setPwConfirm(e.target.value); setPwMsg(null); }} style={{ ...S.inp, padding: "8px 12px" }} />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={doChangePassword} disabled={pwLoading} style={{ ...S.btn, opacity: pwLoading ? 0.5 : 1 }}>{pwLoading ? "Updating..." : "Update Password"}</button>
+            </div>
+            {pwMsg && <p style={{ fontSize: 12, color: pwMsg.ok ? "#22c55e" : "#ef4444", margin: 0 }}>{pwMsg.text}</p>}
+          </div>
+        </div>
         <div style={{ ...S.card, marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Export / Import Data</h3>
           <p style={{ fontSize: 12, color: "#71717a", marginBottom: 12 }}>Use this to migrate data or create backups.</p>
