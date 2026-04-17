@@ -4,7 +4,9 @@ import { storage } from "../lib/storage";
 import { fetchDailyReturns, fetchHistoricalPrices, extractTickers, returnsToText } from "../lib/market";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, ComposedChart, Area } from "recharts";
 
-const TABS = ["Import","Dashboard","Daily","Monthly","Sectors","Trades","Viz","Attribution","Settings"];
+const TABS = ["Import","Dashboard","Daily","Weekly","Monthly","Sectors","Trades","Viz","Attribution","Settings"];
+const getMonday = dateStr => { const d = new Date(dateStr + "T12:00:00"); const day = d.getDay(); d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day)); return d.toISOString().slice(0, 10); };
+const fmtWk = w => { const d = new Date(w + "T12:00:00"); return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
 const colF = v => v > 0.001 ? "#22c55e" : v < -0.001 ? "#ef4444" : "#71717a";
 const fP = v => (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
 const fB = v => (v >= 0 ? "+" : "") + (v * 100).toFixed(0) + " bps";
@@ -71,6 +73,8 @@ export default function PnLTracker({ session }) {
   const [attrFilter, setAttrFilter] = useState({ ticker: "", side: "All", sector: "All" });
   const [monthFilter, setMonthFilter] = useState({ ticker: "", side: "All", sector: "All" });
   const [monthSort, setMonthSort] = useState({ col: null, dir: "desc" });
+  const [weekFilter, setWeekFilter] = useState({ ticker: "", side: "All", sector: "All" });
+  const [weekSort, setWeekSort] = useState({ col: null, dir: "desc" });
   const [secSort, setSecSort] = useState({ col: "cumPnl", dir: "desc" });
   const [vizMetrics, setVizMetrics] = useState(["cumTotal", "battingAvg", "sharpe"]);
   const [vizWindow, setVizWindow] = useState("cumulative");
@@ -481,6 +485,13 @@ const fetchTradesData = async (ticker) => {
     return Object.values(m);
   }, [dec]);
 
+  const weeks = useMemo(() => [...new Set(dec.map(d => getMonday(d.date)))].sort(), [dec]);
+  const weeklyTk = useMemo(() => {
+    const m = {};
+    dec.forEach(d => { const wk = getMonday(d.date); d.entries.forEach(e => { const k = `${e.ticker}-${e.dir}`; if (!m[k]) m[k] = { ticker: e.ticker, dir: e.dir, weeks: {} }; if (!m[k].weeks[wk]) m[k].weeks[wk] = 0; m[k].weeks[wk] = +(m[k].weeks[wk] + e.pnl).toFixed(4); }); });
+    return Object.values(m);
+  }, [dec]);
+
   const secAn = useMemo(() => {
     if (!dec.length) return [];
     const sd = {};
@@ -644,7 +655,7 @@ const fetchTradesData = async (ticker) => {
       </>}</div>}
 
       {/* ATTRIBUTION */}
-      {tab === 7 && (() => {
+      {tab === 8 && (() => {
         const allSec = [...new Set(cumTk.map(t => sect[t.ticker] || "Unassigned"))].sort();
         const filt = cumTk.filter(t => { if (attrFilter.ticker && !t.ticker.includes(attrFilter.ticker.toUpperCase())) return false; if (attrFilter.side !== "All" && t.dir !== attrFilter.side) return false; if (attrFilter.sector !== "All" && (sect[t.ticker] || "Unassigned") !== attrFilter.sector) return false; return true; });
         const srt = [...filt].sort((a, b) => { const c = attrSort.col; if (c === "ticker") return attrSort.dir === "asc" ? a.ticker.localeCompare(b.ticker) : b.ticker.localeCompare(a.ticker); if (c === "sector") { const va = sect[a.ticker] || "Z", vb = sect[b.ticker] || "Z"; return attrSort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); } if (c === "roic") { const va = a.roic ?? -Infinity, vb = b.roic ?? -Infinity; return attrSort.dir === "asc" ? va - vb : vb - va; } const va = a[c] || 0, vb = b[c] || 0; return attrSort.dir === "asc" ? va - vb : vb - va; });
@@ -668,8 +679,39 @@ const fetchTradesData = async (ticker) => {
         </div>;
       })()}
 
-      {/* MONTHLY */}
+      {/* WEEKLY */}
       {tab === 3 && (() => {
+        const allSec = [...new Set(weeklyTk.map(t => sect[t.ticker] || "Unassigned"))].sort();
+        const filt = weeklyTk.filter(t => { if (weekFilter.ticker && !t.ticker.includes(weekFilter.ticker.toUpperCase())) return false; if (weekFilter.side !== "All" && t.dir !== weekFilter.side) return false; if (weekFilter.sector !== "All" && (sect[t.ticker] || "Unassigned") !== weekFilter.sector) return false; return true; });
+        const srt = [...filt].sort((a, b) => { const c = weekSort.col; if (!c || c === "ticker") return (weekSort.dir === "asc" ? 1 : -1) * a.ticker.localeCompare(b.ticker); if (c === "sector") { const va = sect[a.ticker] || "Z", vb = sect[b.ticker] || "Z"; return weekSort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); } if (c === "ytd") { const va = weeks.reduce((s, wk) => s + (a.weeks[wk] || 0), 0), vb = weeks.reduce((s, wk) => s + (b.weeks[wk] || 0), 0); return weekSort.dir === "asc" ? va - vb : vb - va; } const va = a.weeks[c] || 0, vb = b.weeks[c] || 0; return weekSort.dir === "asc" ? va - vb : vb - va; });
+        const toggle = c => setWeekSort(p => ({ col: c, dir: p.col === c && p.dir === "desc" ? "asc" : "desc" }));
+        const arr = c => weekSort.col === c ? (weekSort.dir === "desc" ? " ▼" : " ▲") : "";
+        const lo = srt.filter(t => t.dir === "L"), sh = srt.filter(t => t.dir === "S");
+        const sumW = items => { const r = {}; weeks.forEach(wk => { r[wk] = items.reduce((s, t) => s + (t.weeks[wk] || 0), 0); }); return r; };
+        const totW = sumW(srt), loW = sumW(lo), shW = sumW(sh);
+        return <div style={S.card}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Weekly P&L</h3>
+          <p style={{ fontSize: 12, color: "#71717a", marginBottom: 12 }}>P&L by ticker by week (bps). Weeks start Monday.</p>
+          {weeklyTk.length > 0 && <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><label style={{ fontSize: 11, color: "#71717a" }}>Ticker:</label><input value={weekFilter.ticker} onChange={e => setWeekFilter(p => ({ ...p, ticker: e.target.value }))} placeholder="Search" style={{ ...S.inp, width: 100, padding: "4px 8px", fontSize: 12 }} /></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><label style={{ fontSize: 11, color: "#71717a" }}>Side:</label><select value={weekFilter.side} onChange={e => setWeekFilter(p => ({ ...p, side: e.target.value }))} style={{ ...S.inp, width: 70, padding: "4px 8px", fontSize: 12 }}><option value="All">All</option><option value="L">L</option><option value="S">S</option></select></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><label style={{ fontSize: 11, color: "#71717a" }}>Sector:</label><select value={weekFilter.sector} onChange={e => setWeekFilter(p => ({ ...p, sector: e.target.value }))} style={{ ...S.inp, width: 130, padding: "4px 8px", fontSize: 12 }}><option value="All">All</option>{allSec.map(x => <option key={x} value={x}>{x}</option>)}</select></div>
+            <span style={{ fontSize: 11, color: "#71717a" }}>{srt.length}/{weeklyTk.length}</span>
+          </div>}
+          {weeklyTk.length === 0 ? <p style={{ color: "#71717a" }}>No data.</p> : <div style={{ overflowX: "auto" }}><div style={{ maxHeight: 500, overflowY: "auto" }}><table style={{ minWidth: 500 + weeks.length * 80 }}><thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#1a1d27" }}><tr>
+            <th onClick={() => toggle("ticker")} style={{ ...S.th, cursor: "pointer", userSelect: "none", position: "sticky", left: 0, background: "#1a1d27", zIndex: 2 }}>Ticker{arr("ticker")}</th>
+            <th style={S.th}>Side</th><th onClick={() => toggle("sector")} style={{ ...S.th, cursor: "pointer", userSelect: "none" }}>Sector{arr("sector")}</th>
+            {weeks.map(wk => <th key={wk} onClick={() => toggle(wk)} style={{ ...S.th, textAlign: "right", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>{fmtWk(wk)}{arr(wk)}</th>)}
+            <th onClick={() => toggle("ytd")} style={{ ...S.th, textAlign: "right", cursor: "pointer", userSelect: "none", borderLeft: "2px solid #2a2d3a" }}>Total{arr("ytd")}</th>
+          </tr></thead><tbody>
+            {srt.map((t, i) => { const ytd = weeks.reduce((s, wk) => s + (t.weeks[wk] || 0), 0); return <tr key={i}><td style={{ ...S.td, fontWeight: 600, position: "sticky", left: 0, background: "#1a1d27", zIndex: 1 }}>{t.ticker}</td><td style={S.td}><Sd d={t.dir} /></td><td style={{ ...S.td, color: sect[t.ticker] ? "#e4e4e7" : "#71717a", fontSize: 12 }}>{sect[t.ticker] || "—"}</td>{weeks.map(wk => { const v = t.weeks[wk] || 0; return <td key={wk} style={{ ...S.td, textAlign: "right", color: colF(v), fontWeight: v !== 0 ? 600 : 400 }}>{v !== 0 ? fB(v) : "—"}</td>; })}<td style={{ ...S.td, textAlign: "right", color: colF(ytd), fontWeight: 700, borderLeft: "2px solid #2a2d3a" }}>{fB(ytd)}</td></tr>; })}
+            {[{ l: "TOTAL", d: totW, c: null, w: 700 }, { l: "LONG", d: loW, c: "#22c55e", w: 600, n: lo.length }, { l: "SHORT", d: shW, c: "#ef4444", w: 600, n: sh.length }].map((r, i) => { const ytd = weeks.reduce((s, wk) => s + (r.d[wk] || 0), 0); return <tr key={"s" + i} style={i === 0 ? { borderTop: "2px solid #2a2d3a" } : {}}><td style={{ ...S.td, fontWeight: r.w, color: r.c || "#e4e4e7", position: "sticky", left: 0, background: "#1a1d27", zIndex: 1 }}>{r.l}</td><td style={S.td}></td><td style={{ ...S.td, fontSize: 11, color: "#71717a" }}>{r.n ? r.n + " pos" : ""}</td>{weeks.map(wk => { const v = r.d[wk] || 0; return <td key={wk} style={{ ...S.td, textAlign: "right", color: colF(v), fontWeight: r.w }}>{fB(v)}</td>; })}<td style={{ ...S.td, textAlign: "right", color: colF(ytd), fontWeight: r.w, borderLeft: "2px solid #2a2d3a" }}>{fB(ytd)}</td></tr>; })}
+          </tbody></table></div></div>}
+        </div>;
+      })()}
+
+      {/* MONTHLY */}
+      {tab === 4 && (() => {
         const allSec = [...new Set(monthlyTk.map(t => sect[t.ticker] || "Unassigned"))].sort();
         const filt = monthlyTk.filter(t => { if (monthFilter.ticker && !t.ticker.includes(monthFilter.ticker.toUpperCase())) return false; if (monthFilter.side !== "All" && t.dir !== monthFilter.side) return false; if (monthFilter.sector !== "All" && (sect[t.ticker] || "Unassigned") !== monthFilter.sector) return false; return true; });
         const srt = [...filt].sort((a, b) => { const c = monthSort.col; if (!c || c === "ticker") return (monthSort.dir === "asc" ? 1 : -1) * a.ticker.localeCompare(b.ticker); if (c === "sector") { const va = sect[a.ticker] || "Z", vb = sect[b.ticker] || "Z"; return monthSort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); } if (c === "ytd") { const va = months.reduce((s, mo) => s + (a.months[mo] || 0), 0), vb = months.reduce((s, mo) => s + (b.months[mo] || 0), 0); return monthSort.dir === "asc" ? va - vb : vb - va; } const va = a.months[c] || 0, vb = b.months[c] || 0; return monthSort.dir === "asc" ? va - vb : vb - va; });
@@ -700,7 +742,7 @@ const fetchTradesData = async (ticker) => {
       })()}
 
       {/* SECTORS */}
-      {tab === 4 && (() => {
+      {tab === 5 && (() => {
         const st = SortTh({ col: secSort.col, dir: secSort.dir, setSort: setSecSort });
         const srt = [...secAn].sort((a, b) => { const c = secSort.col; if (c === "sector") return secSort.dir === "asc" ? a.sector.localeCompare(b.sector) : b.sector.localeCompare(a.sector); if (c === "wrAll") { const va = a.totalPos > 0 ? a.winAll / a.totalPos : 0, vb = b.totalPos > 0 ? b.winAll / b.totalPos : 0; return secSort.dir === "asc" ? va - vb : vb - va; } if (c === "wrLong") { const va = a.totalLong > 0 ? a.winLong / a.totalLong : 0, vb = b.totalLong > 0 ? b.winLong / b.totalLong : 0; return secSort.dir === "asc" ? va - vb : vb - va; } if (c === "wrShort") { const va = a.totalShort > 0 ? a.winShort / a.totalShort : 0, vb = b.totalShort > 0 ? b.winShort / b.totalShort : 0; return secSort.dir === "asc" ? va - vb : vb - va; } if (c === "roic" || c === "sharpe" || c === "slugging") { const va = a[c] ?? -Infinity, vb = b[c] ?? -Infinity; return secSort.dir === "asc" ? va - vb : vb - va; } const va = a[c] || 0, vb = b[c] || 0; return secSort.dir === "asc" ? va - vb : vb - va; });
         return <div>{secAn.length === 0 ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#71717a" }}>Assign sectors in Attribution.</div> : <div style={S.card}><h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Sector Analytics</h3><div style={{ overflowX: "auto" }}><table><thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#1a1d27" }}><tr>{st.th("Sector","sector")}{st.th("Cum P&L","cumPnl",true)}{st.th("Long","longPnl",true)}{st.th("Short","shortPnl",true)}{st.th("Avg Wt","avgWt",true)}{st.th("ROIC","roic",true)}{st.th("Batting","battingAvg",true)}{st.th("Vol","vol",true)}{st.th("Sharpe","sharpe",true)}{st.th("Slug","slugging",true)}{st.th("Win","wrAll",true)}{st.th("Win L","wrLong",true)}{st.th("Win S","wrShort",true)}</tr></thead><tbody>
@@ -710,7 +752,7 @@ const fetchTradesData = async (ticker) => {
       })()}
 
       {/* VIZ */}
-      {tab === 6 && <div>
+      {tab === 7 && <div>
         {kpiSeries.length === 0 ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#71717a" }}>No data. Import baseline + one day with returns.</div> : <div>
           <div style={{ ...S.card, marginBottom: 16 }}>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -745,7 +787,7 @@ const fetchTradesData = async (ticker) => {
       </div>}
 
       {/* TRADES */}
-      {tab === 5 && (() => {
+      {tab === 6 && (() => {
         const allTickers = [...new Set(hist.flatMap(h => h.entries.map(e => e.ticker)))].sort();
         const allTradesSectors = [...new Set(allTickers.map(t => sect[t] || "Unassigned"))].sort();
         const filteredTickers = allTickers.filter(t => {
@@ -843,7 +885,7 @@ const fetchTradesData = async (ticker) => {
       })()}
 
       {/* SETTINGS */}
-      {tab === 8 && <div>
+      {tab === 9 && <div>
         <div style={{ ...S.card, marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Export / Import Data</h3>
           <p style={{ fontSize: 12, color: "#71717a", marginBottom: 12 }}>Use this to migrate data or create backups.</p>
